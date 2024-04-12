@@ -1,5 +1,6 @@
 import os
 from argparse import ArgumentParser
+from client_updated import *
 import airsimdroneracinglab as airsim
 import cv2
 import threading
@@ -47,6 +48,51 @@ def calculate_angle_difference(vector1, vector2):
     angle_degrees = np.degrees(theta)
     
     return theta
+
+def get_neighborhood_position(position, deviation=0.25):
+    """Discretize the space to identify the neighborhood of a given position."""
+    x, y, z = position
+    neighborhood_x = round(x / deviation) * deviation
+    neighborhood_y = round(y / deviation) * deviation
+    neighborhood_z = round(z / deviation) * deviation
+    return (neighborhood_x, neighborhood_y, neighborhood_z)
+
+
+class TrainingLogger:
+    def __init__(self):
+        self.episode_logs = []
+        self.position_change_scores = {}  # Tracks scores by neighborhood
+
+    def log_step(self, position, reward):
+        """Log the drone's position and reward for the current step."""
+        self.episode_logs.append((position, reward))
+
+    def end_episode(self):
+        """Analyze the episode and update scores based on neighborhoods."""
+        for i in range(1, len(self.episode_logs)):
+            prev_position, prev_reward = self.episode_logs[i - 1]
+            position, reward = self.episode_logs[i]
+            reward_change = reward - prev_reward
+
+            if reward_change < 0:  # Focus on negative changes
+                neighborhood = get_neighborhood_position(prev_position)
+                if neighborhood not in self.position_change_scores:
+                    self.position_change_scores[neighborhood] = 0
+                self.position_change_scores[neighborhood] += abs(reward_change)
+                
+        self.episode_logs = []
+
+    def get_challenging_start_position(self, episodes_to_consider):
+        if len(self.position_change_scores) == 0 or episodes_to_consider == 0:
+            return None
+        
+        for position in self.position_change_scores:
+            self.position_change_scores[position] /= episodes_to_consider
+        
+        challenging_neighborhood = max(self.position_change_scores, key=self.position_change_scores.get)
+        return challenging_neighborhood
+
+
 
 class DynamicCurriculumScheduler:
     def __init__(self, total_gates, review_frequency=0.1):
@@ -103,7 +149,7 @@ class GateNavigator:
         self.current_gate_index = 0  # Start with the first gate as the target
         self.reached_gate = False
     
-    def update_drone_position(self, drone_position, threshold=1.0):
+    def update_drone_position(self, drone_position, threshold=1.5):
         """
         Update the drone's position and determine if it's time to target the next gate.
         
@@ -168,7 +214,7 @@ class DroneEnvSB3(gym.Env):
         
         self.navigator = None
         
-        self.airsim_client = airsim.MultirotorClient()
+        self.airsim_client = MultirotorClient()
         self.airsim_client.confirmConnection()
 
         
@@ -179,9 +225,9 @@ class DroneEnvSB3(gym.Env):
         # we need two airsim MultirotorClient objects because the comm lib we use (rpclib) is not thread safe
         # so we poll images in a thread using one airsim MultirotorClient object
         # and use another airsim MultirotorClient for querying state commands
-        self.airsim_client_images = airsim.MultirotorClient()
+        self.airsim_client_images = MultirotorClient()
         self.airsim_client_images.confirmConnection()
-        self.airsim_client_odom = airsim.MultirotorClient()
+        self.airsim_client_odom = MultirotorClient()
         self.airsim_client_odom.confirmConnection()
         self.level_name = None
 
@@ -205,7 +251,7 @@ class DroneEnvSB3(gym.Env):
         )
 
         # Define action and observation space
-        # Actions: Assume 7 discrete actions (e.g., forward, backward, left, right, up, down, no-op)
+        # Actions: Assume 8 discrete actions (e.g., forward, backward, left, right, up, down, no-op)
         self.action_space = spaces.Discrete(8)
         
         # Observation space: position (x, y, z) and orientation (w, x, y, z) of the drone, 
@@ -221,14 +267,15 @@ class DroneEnvSB3(gym.Env):
         self.totalsteps = 0
         self.max_steps = 1000
         self.positions = []
-        self.max_positions_stored = 250  # Max history to track
+        self.max_positions_stored = 50  # Max history to track
         self.max_history_length = 10
         self.drifting_threshold = 10
         self.previous_distance = 0
         self.img_index = 0
+        self.episode_number = 1
         self.test_mode = test_mode
 
-        race_tier = 4
+        race_tier = 1
         level_name = "Soccer_Field_Easy"
         self.load_level(level_name)
         self.start_race(race_tier)
@@ -254,27 +301,82 @@ class DroneEnvSB3(gym.Env):
             "prev_position": np.zeros(3),
         }
 
+        self.logger = TrainingLogger()
+
     
 
     def reset(self, seed=None):
         self.timesteps = 0
+        episodes_to_consider = 20
+        std_dev = np.array([0.2, 0.2, 0.2])
+        self.consecutive_stuck_steps = 0 
+        self.drift_duration = 0
+        self.stuck_threshold = 25
+
         self.positions = []
         self.distance_history = []
         self.airsim_client.reset()
         self.navigator = GateNavigator(self.gate_poses_ground_truth)
         self.scheduler = DynamicCurriculumScheduler(self.total_gates, review_frequency=0.25)
         self.initialize_drone()
-        #self.airsim_client.moveToYawAsync(yaw=90).join()
-        self.takeoff_with_moveOnSpline(takeoff_height=-3.5) #
+
         
+        self.takeoff_with_moveOnSpline(takeoff_height=-1.0) #
+        self.airsim_client.moveToYawAsync(yaw=90).join()
 
         state = self.airsim_client.getMultirotorState().kinematics_estimated
         self.home_position = np.array([state.position.x_val, state.position.y_val, state.position.z_val])
         
-        gate_index = self.scheduler.select_start_gate()
+        gate_index = 0 #self.scheduler.select_start_gate()
 
         gate_state = self.gate_poses_ground_truth[gate_index]
         gate_position = np.array([gate_state.position.x_val, gate_state.position.y_val, gate_state.position.z_val])
+        
+        
+
+        if self.episode_number % episodes_to_consider == 0:
+            start_position = self.logger.get_challenging_start_position(episodes_to_consider)
+
+            if start_position is not None:
+                # for log in self.logger.episode_logs[0]:
+                #     print (log)
+
+                # print("New start position: ", start_position)
+                init_position = airsim.Vector3r(start_position[0], start_position[1], start_position[2])
+                self.airsim_client.moveOnSplineAsync(
+                    [init_position],
+                    vel_max=15.0,
+                    acc_max=5.0,
+                    add_position_constraint=True,
+                    add_velocity_constraint=False,
+                    add_acceleration_constraint=False,
+                    viz_traj=self.viz_traj,
+                    viz_traj_color_rgba=self.viz_traj_color_rgba,
+                    vehicle_name=self.drone_name,
+                ).join()
+
+        else:
+            
+            # Initialize the drone's position with Gaussian noise
+            initial_position_array = self.home_position + np.random.normal(0, std_dev, size=self.home_position.shape)
+            initial_position = airsim.Vector3r(initial_position_array[0], initial_position_array[1], initial_position_array[2])
+                    
+            # self.airsim_client.moveToYawAsync(yaw=90).join()
+
+            self.airsim_client.moveToPositionAsync(x=initial_position_array[0], y=initial_position_array[1], z=initial_position_array[2], velocity=15).join()
+
+            # self.airsim_client.moveOnSplineAsync(
+            #     [initial_position],
+            #     vel_max=15.0,
+            #     acc_max=5.0,
+            #     add_position_constraint=True,
+            #     add_velocity_constraint=False,
+            #     add_acceleration_constraint=False,
+            #     viz_traj=self.viz_traj,
+            #     viz_traj_color_rgba=self.viz_traj_color_rgba,
+            #     vehicle_name=self.drone_name,
+            # ).join()
+
 
         # # gate_index = np.random.randint(0,6)
         # # print(f"Drone goes towards to the Gate {gate_index} for training")
@@ -347,85 +449,6 @@ class DroneEnvSB3(gym.Env):
 
         return observation, {}
 
-    
-    def _do_action_velocity(self, action, step_length, duration=0.5):
-        quad_vel = self.airsim_client.getMultirotorState().kinematics_estimated
-        drone_angle = self.get_gate_facing_vector_from_quaternion(quad_vel.orientation)
-        angle_step_length = step_length * 180 / np.pi
-
-        # quad_offset = self.interpret_action(action)
-        if action == 0:
-            self.airsim_client.moveByVelocityAsync(quad_vel.linear_velocity.x_val + step_length, quad_vel.linear_velocity.y_val, quad_vel.linear_velocity.z_val, duration).join()
-        elif action == 1:
-            self.airsim_client.moveByVelocityAsync(quad_vel.linear_velocity.x_val, quad_vel.linear_velocity.y_val + step_length, quad_vel.linear_velocity.z_val, duration).join()
-        elif action == 2:
-            self.airsim_client.moveByVelocityAsync(quad_vel.linear_velocity.x_val, quad_vel.linear_velocity.y_val, quad_vel.linear_velocity.z_val + step_length ,duration).join()
-        elif action == 3:
-            self.airsim_client.moveByVelocityAsync(quad_vel.linear_velocity.x_val - step_length, quad_vel.linear_velocity.y_val, quad_vel.linear_velocity.z_val, duration).join()
-        elif action == 4:
-            self.airsim_client.moveByVelocityAsync(quad_vel.linear_velocity.x_val, quad_vel.linear_velocity.y_val - step_length, quad_vel.linear_velocity.z_val, duration).join()
-        elif action == 5:
-            self.airsim_client.moveByVelocityAsync(quad_vel.linear_velocity.x_val, quad_vel.linear_velocity.y_val, quad_vel.linear_velocity.z_val - step_length, duration).join()
-        elif action == 6:
-            self.airsim_client.moveByYawRateAsync(quad_vel.angular_velocity.z_val + angle_step_length, duration).join()
-        elif action == 7:
-            self.airsim_client.moveByYawRateAsync(quad_vel.angular_velocity.z_val - angle_step_length, duration).join()
-
-
-    def _do_action_position(self, action, step_length, duration=0.5):
-        state = self.airsim_client.getMultirotorState().kinematics_estimated
-        quad_pos = state.position
-        angle = self.get_gate_facing_vector_from_quaternion(state.orientation)
-        
-        angle_step_length = step_length * 180 / np.pi
-        vel = 10.0
-
-        # quad_offset = self.interpret_action(action)
-        if action == 0:
-            self.airsim_client.moveToPositionAsync(x = quad_pos.x_val + step_length, y = quad_pos.y_val, z = quad_pos.z_val, velocity=vel).join()
-        elif action == 1:
-            self.airsim_client.moveToPositionAsync(x = quad_pos.x_val, y = quad_pos.y_val + step_length, z = quad_pos.z_val, velocity=vel).join()
-        elif action == 2:
-            self.airsim_client.moveToPositionAsync(x = quad_pos.x_val, y = quad_pos.y_val, z = quad_pos.z_val + step_length ,velocity=vel).join()
-        elif action == 3:
-            self.airsim_client.moveToPositionAsync(x = quad_pos.x_val - step_length, y = quad_pos.y_val, z = quad_pos.z_val, velocity=vel).join()
-        elif action == 4:
-            self.airsim_client.moveToPositionAsync(x = quad_pos.x_val, y = quad_pos.y_val - step_length, z = quad_pos.z_val, velocity=vel).join()
-        elif action == 5:
-            self.airsim_client.moveToPositionAsync(x = quad_pos.x_val, y = quad_pos.y_val, z = quad_pos.z_val - step_length, velocity=vel).join()
-        elif action == 6:
-            self.airsim_client.moveToYawAsync(yaw = angle.z_val + angle_step_length).join()
-        elif action == 7:
-            self.airsim_client.moveToYawAsync(yaw = angle.z_val - angle_step_length).join()
-
-
-    def _do_action_angle(self, action, step_length=0.25, duration=0.5):
-        state = self.airsim_client.getMultirotorState().kinematics_estimated
-        angle = self.get_gate_facing_vector_from_quaternion(state.orientation)
-        
-        # angle_step_length = self.step_length * 180 / np.pi
-        # moveByAngleZAsync
-
-        if action == 0:
-            self.airsim_client.moveByRollPitchYawZAsync(roll=step_length, pitch=0, yaw=0, z=state.position.z_val, duration=duration).join()
-        elif action == 1:
-            self.airsim_client.moveByRollPitchYawZAsync(roll=-step_length, pitch=0, yaw=0, z=state.position.z_val, duration=duration).join()
-        elif action == 2:
-            self.airsim_client.moveByRollPitchYawZAsync(roll=0, pitch=step_length, yaw=0, z=state.position.z_val, duration=duration).join()
-        elif action == 3:
-            self.airsim_client.moveByRollPitchYawZAsync(roll=0, pitch=-step_length, yaw=0, z=state.position.z_val, duration=duration).join()
-        elif action == 4:
-            self.airsim_client.moveByRollPitchYawZAsync(roll=0, pitch=0, yaw=step_length, z=state.position.z_val, duration=duration).join()
-        elif action == 5:
-            self.airsim_client.moveByRollPitchYawZAsync(roll=0, pitch=0, yaw=-step_length, z=state.position.z_val, duration=duration).join()
-        elif action == 6:
-            self.airsim_client.moveByRollPitchYawZAsync(roll=0, pitch=0, yaw=0, z=state.position.z_val + 2*step_length, duration=duration).join()
-        elif action == 7:
-            self.airsim_client.moveByRollPitchYawZAsync(roll=0, pitch=0, yaw=0, z=state.position.z_val - 2*step_length, duration=duration).join()
-        
-        state = self.airsim_client.getMultirotorState().kinematics_estimated
-        angle = self.get_gate_facing_vector_from_quaternion(state.orientation)
-
     def _do_action_angle_rate(self, action, step_length=0.25, duration=0.5):
         state = self.airsim_client.getMultirotorState().kinematics_estimated
         angular_rates = state.angular_velocity
@@ -453,39 +476,6 @@ class DroneEnvSB3(gym.Env):
             self.airsim_client.moveByVelocityAsync(vx = quad_vel.linear_velocity.x_val, vy = quad_vel.linear_velocity.y_val, vz = quad_vel.linear_velocity.z_val - step_length, duration = duration).join()
         
         state = self.airsim_client.getMultirotorState().kinematics_estimated
-        angle = self.get_gate_facing_vector_from_quaternion(state.orientation)
-
-        # print (f"action: {action} roll: {angle.x_val:.4f} pitch: {angle.y_val:.4f} yaw: {angle.z_val:.4f} z: {state.position.z_val:.4f}")
-
-    
-
-    def _do_action(self, action):
-        quad_offset = self.interpret_action(action)
-        quad_vel = self.airsim_client.getMultirotorState().kinematics_estimated.linear_velocity
-        self.airsim_client.moveByVelocityAsync(
-            quad_vel.x_val + quad_offset[0],
-            quad_vel.y_val + quad_offset[1],
-            quad_vel.z_val + quad_offset[2],
-            5,
-        ).join()
-
-    def interpret_action(self, action):
-        if action == 0:
-            quad_offset = (self.step_length, 0, 0)
-        elif action == 1:
-            quad_offset = (0, self.step_length, 0)
-        elif action == 2:
-            quad_offset = (0, 0, self.step_length)
-        elif action == 3:
-            quad_offset = (-self.step_length, 0, 0)
-        elif action == 4:
-            quad_offset = (0, -self.step_length, 0)
-        elif action == 5:
-            quad_offset = (0, 0, -self.step_length)
-        else:
-            quad_offset = (0, 0, 0)
-
-        return quad_offset
     
 
     def transform_obs(self, responses):
@@ -521,36 +511,30 @@ class DroneEnvSB3(gym.Env):
         info = {}
         self.timesteps += 1
         self.totalsteps += 1
-        step_length = 0.25
+        step_length = 0.1
 
-        self._do_action_angle_rate(action, step_length=step_length, duration=1.0)
+        self._do_action_angle_rate(action, step_length=step_length, duration=0.25)
         
         # Calculate new state and reward
         observation = self._get_observation()
-        reward, terminated = self._compute_reward_April6(action=action, verbose=verbose)
+        reward, terminated = self._compute_reward_April12(action=action, verbose=verbose)
 
         # time.sleep(0.25)
 
         truncated = False
         if self.timesteps >= self.max_steps:
             truncated = True
+        
+        if terminated or truncated:
+            self.logger.end_episode()  # End of episode, save logs
+            self.episode_number += 1
+
 
         info["passed_gates"] = self.navigator.current_gate_index - 1
 
         return observation, reward, terminated, truncated, info
 
-    # def step(self, action):
-    #     self.timesteps += 1
-    #     self._do_action(action)
-    #     obs = self._get_obs()
-    #     reward, done = self._compute_reward_original()
-
-    #     truncated = False
-    #     if self.timesteps >= self.max_steps:
-    #         truncated = True
-
-    #     return obs, reward, done, truncated, self.state
-
+    
     def _check_positions_change(self, diff_thresh=0.2):
         # Implement this method to check if the change in positions is not remarkable
         # This is a placeholder for your logic to determine if the changes are significant
@@ -563,27 +547,8 @@ class DroneEnvSB3(gym.Env):
         position_changes = np.std(positions_array, axis=0)
         threshold = np.array([diff_thresh, diff_thresh, diff_thresh])  # Example threshold for x, y, z changes
         return np.all(position_changes < threshold)
-    
 
-    def check_if_drifting_away(self):
-        """
-        Check if the drone is consistently moving away from the gate.
-        Returns True if the drone is drifting away, False otherwise.
-        """
-        if len(self.distance_history) < self.max_history_length:
-            return False  # Not enough data to determine drift
-        
-        # Check if each subsequent distance is greater than the previous one
-        for i in range(1, len(self.distance_history)):
-            if self.distance_history[i] <= self.distance_history[i - 1]:
-                return False  # Found a case where the drone did not move away, so it's not drifting away
 
-        # Calculate the total increase in distance to check against the threshold
-        total_increase = self.distance_history[-1] - self.distance_history[0]
-        if total_increase > self.drifting_threshold:
-            return True  # The drone is drifting away
-
-        return False
 
     def _get_observation(self):
         # Return observation
@@ -627,10 +592,11 @@ class DroneEnvSB3(gym.Env):
 
         return threshold
 
-    
-    
 
-    def _compute_reward_April6(self, action, threshold_coeff=5.0, verbose=False):
+
+    def _compute_reward_April12(self, action, threshold_coeff=5.0, verbose=False):
+        done = False
+
         state = self.airsim_client.getMultirotorState()
         self.gate_index = np.clip(self.navigator.current_gate_index, 0, len(self.gate_poses_ground_truth) - 1)
         gate_state = self.gate_poses_ground_truth[self.gate_index]
@@ -638,14 +604,8 @@ class DroneEnvSB3(gym.Env):
         drone_velocity = np.array([state.kinematics_estimated.linear_velocity.x_val, state.kinematics_estimated.linear_velocity.y_val, state.kinematics_estimated.linear_velocity.z_val])
         gate_position = np.array([gate_state.position.x_val, gate_state.position.y_val, gate_state.position.z_val])
         current_distance = np.linalg.norm(drone_position - gate_position)
-        done = False
-
-        drone_angle = self.get_gate_facing_vector_from_quaternion(state.kinematics_estimated.orientation)
-        drone_angular_velocity = state.kinematics_estimated.angular_velocity
-
-        norm_angular_velocity = np.linalg.norm([drone_angular_velocity.x_val, drone_angular_velocity.y_val, drone_angular_velocity.z_val])
-        norm_angle = np.linalg.norm([drone_angle.x_val, drone_angle.y_val, 0*drone_angle.z_val])
         distance_difference = self.previous_distance - current_distance
+        drone_velocity_norm = np.linalg.norm(drone_velocity)
 
         # Update positions list with current position
         current_position = list(drone_position)
@@ -653,25 +613,30 @@ class DroneEnvSB3(gym.Env):
         if len(self.positions) > self.max_positions_stored:
             self.positions.pop(0)  # Keep the list size fixed to the last 20 positions
 
-
-        # safety_reward = self.calculate_safety_reward(drone_position, gate_state)
-        
-        # if (self.gate_index - 1) < 0:
-        #     previous_gate_position = np.copy(self.home_position)
-        # else:
-        #     previous_gate_state = self.gate_poses_ground_truth[self.gate_index - 1]
-        #     previous_gate_position = np.array([previous_gate_state.position.x_val, previous_gate_state.position.y_val, previous_gate_state.position.z_val])
+        self.distance_history.append(current_distance)
+        if len(self.distance_history) > self.max_history_length:
+            self.distance_history.pop(0)
 
 
-        # # Compute the progress along the path segment
-        # current_progress = np.dot(drone_position - previous_gate_position, gate_position - previous_gate_position) / np.linalg.norm(gate_position - previous_gate_position)
-        # previous_progress = np.dot(self.previous_position - previous_gate_position, gate_position - previous_gate_position) / np.linalg.norm(gate_position - previous_gate_position)
-        
-        # # The progress reward is the difference in the progress
-        # progress_reward = current_progress - previous_progress
+        optimal_speed = 1.5  # Define an optimal speed that is safe but effective
+        alignment_scale = 5
 
-        
-        reward = np.clip(current_distance/10.0, -10, 0) + np.clip(10*distance_difference, -10, 10) - norm_angular_velocity
+        speed_reward = -abs(drone_velocity_norm - optimal_speed)  # Penalize deviation from the optimal speed
+
+        # Adjust current distance reward to be less aggressive
+        distance_reward_coefficient = -0.1  # Less severe than previous
+        reward = (current_distance * distance_reward_coefficient) + speed_reward + distance_difference
+
+        alignment_reward_axis0 = self.calculate_alignment_reward(drone_position, gate_position, state.kinematics_estimated.orientation, alignment_scale, 0)
+        # alignment_reward_axis1 = self.calculate_alignment_reward(drone_position, gate_position, state.kinematics_estimated.orientation, alignment_scale, 1)
+        # alignment_reward_axis2 = self.calculate_alignment_reward(drone_position, gate_position, state.kinematics_estimated.orientation, alignment_scale, 2)
+
+        reward += alignment_reward_axis0
+
+
+        movement_reward = self.update_reward_for_movement()
+        reward += movement_reward
+
 
         if self.navigator.current_gate_index == len(self.gate_poses_ground_truth):  # Track completed
             done = True
@@ -680,35 +645,81 @@ class DroneEnvSB3(gym.Env):
             return reward, done
         
         if self.gate_index > self.prev_gate_index:  # A gate has been passed
-            reward = 50.0  # Reward for passing a gate plus movement reward
+            reward = 20.0  # Reward for passing a gate plus movement reward
             self.prev_gate_index = np.copy(self.gate_index)
 
         # Collision or out of bounds
-        if state.collision.has_collided or drone_position[2] > 3 or drone_position[2] < -1.0:
-            reward = -10.0  # Severe penalty for collision or out of bounds
+        if state.collision.has_collided or drone_position[2] < -1.0 or drone_position[2] > 3.5:
+            reward -= 5.0  # Severe penalty for collision or out of bounds
             # print('Collision')
 
         # Out of track
         if current_distance >= self.calculate_threshold(threshold_coeff):
             done = True
-            reward = -50.0  # Severe penalty for being out of track
-            # print (self.distance_history)
+            reward = -10.0  # Severe penalty for being out of track
             # print('Out of track')
 
         # Stuck detection
-        if self._check_positions_change() and len(self.positions) == self.max_positions_stored:
+        if self.consecutive_stuck_steps >= self.stuck_threshold:
             done = True
-            reward = -50.0  # Severe penalty for being stuck
-            # print("Stuck at a location")
+            reward -= 10.0  # Significant penalty for being stuck enough to end the episode
+            # print("Terminating episode due to being stuck.")
 
+
+        # Reward based on making continual progress towards the gate, penalize early for lack of movement
+        if len(self.positions) >= self.max_positions_stored and not self._check_positions_change():
+            incremental_stuck_penalty = -1  # Apply smaller penalties earlier
+            reward += incremental_stuck_penalty
 
         if verbose:
-            print(f"Step: {self.timesteps}/{self.totalsteps} Action: {action} Reward: {reward:.3f} Distance: {current_distance:.3f} Distance Difference: {10*distance_difference:.3f} Rate: {-norm_angular_velocity:.3f} Target Gate: {self.gate_index}")
+            print(f"Episode: {self.episode_number} Step: {self.timesteps}/{self.totalsteps} Reward: {reward:.3f} Velocity: {drone_velocity_norm:.3f} Distance: {current_distance:.3f} Distance Difference: {distance_difference:.3f} Alignment: {alignment_reward_axis0:.3f} Movement: {movement_reward:.3f} Target Gate: {self.gate_index}")
             
         self.previous_distance = np.copy(current_distance)
         self.previous_position = np.copy(drone_position)
 
+        self.logger.log_step(drone_position, reward)
+
         return reward, done
+
+
+    def calculate_alignment_reward(self, drone_position, gate_position, drone_orientation, scale=5, axis=1):
+        # Calculate the vector from drone to gate
+        vector_to_gate = gate_position - drone_position
+        vector_to_gate_norm = np.linalg.norm(vector_to_gate)
+        if vector_to_gate_norm == 0:
+            print("Warning: Drone position is identical to gate position.")
+            return 0  # Avoid division by zero
+        vector_to_gate /= vector_to_gate_norm
+
+        # Calculate the facing direction of the drone
+        facing_vector = self.get_vector_from_quaternion(quat = drone_orientation, axis = axis)
+        facing_vector_norm = np.linalg.norm(facing_vector)
+        if facing_vector_norm == 0:
+            print("Warning: Facing vector norm is zero.")
+            return 0  # Avoid division by zero
+        facing_vector /= facing_vector_norm
+
+        # Dot product to determine alignment
+        alignment = np.dot(vector_to_gate, facing_vector)
+        alignment_reward = scale * alignment  # Scale as needed
+
+        # Debug output
+        # print(f"Vector to gate: {vector_to_gate}, Facing vector: {facing_vector}, Alignment: {alignment}")
+
+        return alignment_reward
+
+    def update_reward_for_movement(self):
+        """Updates the reward based on the drone's movement and progress."""
+        reward = 0
+        if len(self.positions) >= self.max_positions_stored:
+            if self._check_positions_change():
+                # If positions haven't changed sufficiently, assume potential stuck condition
+                self.consecutive_stuck_steps += 1
+                incremental_stuck_penalty = -0.5 * self.consecutive_stuck_steps  # Increase penalty with time stuck
+                reward += incremental_stuck_penalty
+            else:
+                self.consecutive_stuck_steps = 0  # Reset if there's been adequate movement
+        return reward
 
 
     # loads desired level
@@ -780,16 +791,16 @@ class DroneEnvSB3(gym.Env):
             vehicle_name=self.drone_name,
         ).join()
 
-    def get_gate_facing_vector_from_quaternion(self, gate_quat, scale=1.0):
+    def get_vector_from_quaternion(self, quat, axis=1, scale=1.0):
 
         # convert gate quaternion to rotation matrix.
         # ref: https://en.wikipedia.org/wiki/Rotation_matrix#Quaternion; https://www.lfd.uci.edu/~gohlke/code/transformations.py.html
         q = np.array(
             [
-                gate_quat.w_val,
-                gate_quat.x_val,
-                gate_quat.y_val,
-                gate_quat.z_val,
+                quat.w_val,
+                quat.x_val,
+                quat.y_val,
+                quat.z_val,
             ],
             dtype=np.float64,
         )
@@ -805,12 +816,18 @@ class DroneEnvSB3(gym.Env):
                 [q[1, 3] - q[2, 0], q[2, 3] + q[1, 0], 1.0 - q[1, 1] - q[2, 2]],
             ]
         )
-        gate_facing_vector = rotation_matrix[:, 1]
-        return airsim.Vector3r(
-            scale * gate_facing_vector[0],
-            scale * gate_facing_vector[1],
-            scale * gate_facing_vector[2],
-        )
+        # gate_facing_vector = rotation_matrix[:, 1]
+        gate_facing_vector = rotation_matrix[:, axis]
+
+        return np.array([scale * gate_facing_vector[0],
+                         scale * gate_facing_vector[1],
+                         scale * gate_facing_vector[2]])
+
+        # return airsim.Vector3r(
+        #     scale * gate_facing_vector[0],
+        #     scale * gate_facing_vector[1],
+        #     scale * gate_facing_vector[2],
+        # )
     
     def get_gate_horizontal_normal(self, gate_facing_vector):
         # Zero out the Y-component to project the vector onto the horizontal plane
@@ -899,7 +916,7 @@ class DroneEnvSB3(gym.Env):
         return self.airsim_client.moveOnSplineVelConstraintsAsync(
             [gate_pose.position for gate_pose in self.gate_poses_ground_truth],
             [
-                self.get_gate_facing_vector_from_quaternion(
+                self.get_vector_from_quaternion(
                     gate_pose.orientation, scale=speed_through_gate
                 )
                 for gate_pose in self.gate_poses_ground_truth

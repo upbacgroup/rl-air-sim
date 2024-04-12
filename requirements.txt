@@ -1,0 +1,13 @@
+airsimdroneracinglab
+msgpack-python==0.5.6
+msgpack-rpc-python==0.4.1
+tornado==4.5.3
+numpy
+scipy
+gymnasium
+torch
+stable-baselines3
+tensorboard
+tyro
+wandb
+opencv-python

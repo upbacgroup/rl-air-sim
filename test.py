@@ -3,7 +3,6 @@ import numpy as np
 import torch
 from stable_baselines3 import PPO, DQN
 from stable_baselines3.common.vec_env import DummyVecEnv
-from drone_env import DroneEnv, GateNavigator
 from ppo_train import Agent
 from dqn_train import QNetwork
 from dqn_train import evaluate_agent as dqn_evaluate
@@ -67,16 +66,6 @@ def test_cleanrl():
             viz_traj_color_rgba=[1.0, 1.0, 0.0, 1.0],
             viz_image_cv2=False,
         )
-    
-    
-
-    # race_tier = 4
-    # level_name = "Soccer_Field_Easy"
-    # envs.load_level(level_name)
-    # envs.start_race(race_tier)
-    # envs.get_ground_truth_gate_poses()
-    # envs.navigator = GateNavigator(envs.gate_poses_ground_truth)
-    # envs.start_odometry_callback_thread()
 
     if not os.path.isfile(model_path):
         print("No pre-trained model found")
@@ -99,12 +88,12 @@ def test_cleanrl():
 
 def test_sb3():
 
-    model_path = "SB3/DQN_April1/saved_model/best_model/best_model"
+    model_path = "SB3/PPO_April11/saved_model/best_model/best_model"
     
     env = DummyVecEnv([make_env])
 
-    # model = PPO.load(model_path, env=env)
-    model = DQN.load(model_path, env=env)
+    model = PPO.load(model_path, env=env)
+    # model = DQN.load(model_path, env=env)
 
     obs = env.reset()
     # print ('obs: ', obs)
@@ -121,5 +110,5 @@ def test_sb3():
 
 
 if __name__ == "__main__":
-    # test_sb3()
-    test_cleanrl()
+    test_sb3()
+    # test_cleanrl()

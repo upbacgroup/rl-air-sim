@@ -13,7 +13,7 @@ import torch.optim as optim
 import tyro
 from stable_baselines3.common.buffers import ReplayBuffer
 from torch.utils.tensorboard import SummaryWriter
-from drone_env import DroneEnv, GateNavigator
+from drone_env_sb3 import DroneEnvSB3, GateNavigator
 
 
 @dataclass

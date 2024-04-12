@@ -14,7 +14,6 @@ from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.callbacks import EvalCallback, CallbackList
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.monitor import Monitor
-from sb3_contrib import RecurrentPPO
 from drone_env_sb3 import DroneEnvSB3
 import wandb
 from wandb.integration.sb3 import WandbCallback
@@ -58,8 +57,8 @@ def main():
     train_timesteps = 1000000
     deterministic = True
 
-    load_path = '' #"SB3/PPO_Reward_v4_19_03_18/saved_model/best_model/best_model"
-    exp_name = 'PPO_April3_v8'
+    load_path = "SB3/PPO_April11/saved_model/best_model/best_model"
+    exp_name = 'PPO_April12'
     wandb_project_name = "Airsim_Drone_Gate"
     wandb_entity = "onurakgun"
     now = datetime.now() # current date and time
