@@ -1,5 +1,7 @@
 # Airsim Curriculum Drone Racing Lab Setup
 
+<img src="imgs/1.gif" width="400"> <img src="imgs/2.gif" width="400">
+
 This repository provides a custom setup for drone racing simulations using AirSim, focusing on training AI models using different reinforcement learning libraries. Follow the steps below to set up and start training your drone models.
 
 ## Prerequisites
