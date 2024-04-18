@@ -3,7 +3,7 @@ import numpy as np
 import torch
 from stable_baselines3 import PPO, DQN
 from stable_baselines3.common.vec_env import DummyVecEnv
-from ppo_train import Agent
+from train_crl import Agent
 from dqn_train import QNetwork
 from dqn_train import evaluate_agent as dqn_evaluate
 from drone_env_sb3 import DroneEnvSB3
@@ -88,7 +88,7 @@ def test_cleanrl():
 
 def test_sb3():
 
-    model_path = "SB3/PPO_April11/saved_model/best_model/best_model"
+    model_path = "SB3/PPO_April13/saved_model/best_model/best_model"
     
     env = DummyVecEnv([make_env])
 

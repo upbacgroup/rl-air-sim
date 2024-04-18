@@ -319,129 +319,86 @@ class DroneEnvSB3(gym.Env):
         self.navigator = GateNavigator(self.gate_poses_ground_truth)
         self.scheduler = DynamicCurriculumScheduler(self.total_gates, review_frequency=0.25)
         self.initialize_drone()
-
         
         self.takeoff_with_moveOnSpline(takeoff_height=-1.0) #
-        self.airsim_client.moveToYawAsync(yaw=90).join()
 
         state = self.airsim_client.getMultirotorState().kinematics_estimated
         self.home_position = np.array([state.position.x_val, state.position.y_val, state.position.z_val])
         
-        gate_index = 0 #self.scheduler.select_start_gate()
+        # gate_index = self.scheduler.select_start_gate()
 
-        gate_state = self.gate_poses_ground_truth[gate_index]
-        gate_position = np.array([gate_state.position.x_val, gate_state.position.y_val, gate_state.position.z_val])
-        
-        
-
-        if self.episode_number % episodes_to_consider == 0:
-            start_position = self.logger.get_challenging_start_position(episodes_to_consider)
-
-            if start_position is not None:
-                # for log in self.logger.episode_logs[0]:
-                #     print (log)
-
-                # print("New start position: ", start_position)
-                init_position = airsim.Vector3r(start_position[0], start_position[1], start_position[2])
-                self.airsim_client.moveOnSplineAsync(
-                    [init_position],
-                    vel_max=15.0,
-                    acc_max=5.0,
-                    add_position_constraint=True,
-                    add_velocity_constraint=False,
-                    add_acceleration_constraint=False,
-                    viz_traj=self.viz_traj,
-                    viz_traj_color_rgba=self.viz_traj_color_rgba,
-                    vehicle_name=self.drone_name,
-                ).join()
-
-        else:
-            
-            # Initialize the drone's position with Gaussian noise
-            initial_position_array = self.home_position + np.random.normal(0, std_dev, size=self.home_position.shape)
-            initial_position = airsim.Vector3r(initial_position_array[0], initial_position_array[1], initial_position_array[2])
-                    
-            # self.airsim_client.moveToYawAsync(yaw=90).join()
-
-            self.airsim_client.moveToPositionAsync(x=initial_position_array[0], y=initial_position_array[1], z=initial_position_array[2], velocity=15).join()
-
-            # self.airsim_client.moveOnSplineAsync(
-            #     [initial_position],
-            #     vel_max=15.0,
-            #     acc_max=5.0,
-            #     add_position_constraint=True,
-            #     add_velocity_constraint=False,
-            #     add_acceleration_constraint=False,
-            #     viz_traj=self.viz_traj,
-            #     viz_traj_color_rgba=self.viz_traj_color_rgba,
-            #     vehicle_name=self.drone_name,
-            # ).join()
+        # Define the standard deviation for the Gaussian noise
+        std_dev = np.array([0.2, 0.2, 0.2])  # Adjust these values based on the desired variability
 
 
-        # # gate_index = np.random.randint(0,6)
-        # # print(f"Drone goes towards to the Gate {gate_index} for training")
-
-        # for i in range(gate_index):
-        #     gate_state = self.gate_poses_ground_truth[i]
-        #     gate_position = airsim.Vector3r(gate_state.position.x_val, gate_state.position.y_val, gate_state.position.z_val)
-        #     # print(f"First target Gate {i} x:{gate_state.position.x_val:.4f}, y:{gate_state.position.y_val:.4f}, z:{gate_state.position.z_val:.4f}")
-
-        #     self.airsim_client.moveOnSplineAsync(
-        #         [gate_position],
-        #         vel_max=15.0,
-        #         acc_max=5.0,
-        #         add_position_constraint=True,
-        #         add_velocity_constraint=False,
-        #         add_acceleration_constraint=False,
-        #         viz_traj=self.viz_traj,
-        #         viz_traj_color_rgba=self.viz_traj_color_rgba,
-        #         vehicle_name=self.drone_name,
-        #     ).join()
-
-        # #     state = self.airsim_client.getMultirotorState().kinematics_estimated
-        #     # print(f"Drone Position x:{state.position.x_val:.4f}, y:{state.position.y_val:.4f}, z:{state.position.z_val:.4f}")
-
-
-        
-        
-        # if gate_index > 0:
-        #     prev_gate_state = self.gate_poses_ground_truth[gate_index - 1]
-        #     prev_gate_position = np.array([prev_gate_state.position.x_val, prev_gate_state.position.y_val, prev_gate_state.position.z_val])
-        #     init_position_mean = (gate_position + prev_gate_position) / 2
+        # if self.episode_number < 300:
+        #     gate_index = np.random.randint(1)
+        # elif self.episode_number < 600:
+        #     gate_index = np.random.randint(2)
+        # elif self.episode_number < 1000:
+        #     gate_index = np.random.randint(3)
+        # elif self.episode_number < 1500:
+        #     gate_index = np.random.randint(4)
         # else:
-        #     init_position_mean = np.copy(self.home_position)
+        #     gate_index = np.random.randint(5)
 
 
-        # # Define the standard deviation for the Gaussian noise
-        # std_dev = np.array([0.2, 0.2, 0.2])  # Adjust these values based on the desired variability
+        gate_index = 0
 
-        # # Initialize the drone's position with Gaussian noise
-        # initial_position_array = init_position_mean + np.random.normal(0, std_dev, size=init_position_mean.shape)
-        # initial_position = airsim.Vector3r(initial_position_array[0], initial_position_array[1], initial_position_array[2])
+        for i in range(gate_index):
+            gate_state = self.gate_poses_ground_truth[i].position
+            self.airsim_client.moveOnSplineAsync(
+                [gate_state],
+                vel_max=15.0,
+                acc_max=5.0,
+                add_position_constraint=True,
+                add_velocity_constraint=False,
+                add_acceleration_constraint=False,
+                viz_traj=self.viz_traj,
+                viz_traj_color_rgba=self.viz_traj_color_rgba,
+                vehicle_name=self.drone_name,
+            ).join()
+
+        
+
+        gate_state = self.gate_poses_ground_truth[gate_index].position
+        gate_position = np.array([gate_state.x_val, gate_state.y_val, gate_state.z_val])
+        
+        if gate_index > 0:
+            prev_gate_state = self.gate_poses_ground_truth[gate_index - 1]
+            prev_gate_position = np.array([prev_gate_state.position.x_val, prev_gate_state.position.y_val, prev_gate_state.position.z_val])
+            init_position_mean = (gate_position + prev_gate_position) / 2
+        else:
+            init_position_mean = np.copy(self.home_position)
+        
+
+        # Initialize the drone's position with Gaussian noise
+        initial_position_array = init_position_mean + np.random.normal(0, std_dev, size=init_position_mean.shape)
+        initial_position = airsim.Vector3r(initial_position_array[0], initial_position_array[1], initial_position_array[2])
                 
-        # # self.airsim_client.moveToYawAsync(yaw=90).join()
+        # self.airsim_client.moveToYawAsync(yaw=90).join()
 
-        # # self.airsim_client.moveToPositionAsync(x=initial_position_array[0], y=initial_position_array[1], z=initial_position_array[2], velocity=15).join()
+        # self.airsim_client.moveToPositionAsync(x=initial_position_array[0], y=initial_position_array[1], z=initial_position_array[2], velocity=15).join()
 
-        # self.airsim_client.moveOnSplineAsync(
-        #     [initial_position],
-        #     vel_max=15.0,
-        #     acc_max=5.0,
-        #     add_position_constraint=True,
-        #     add_velocity_constraint=False,
-        #     add_acceleration_constraint=False,
-        #     viz_traj=self.viz_traj,
-        #     viz_traj_color_rgba=self.viz_traj_color_rgba,
-        #     vehicle_name=self.drone_name,
-        # ).join()
-
-
-        # if gate_index == 0:
-        #     self.airsim_client.moveToYawAsync(yaw=90).join()
+        self.airsim_client.moveOnSplineAsync(
+            [initial_position],
+            vel_max=15.0,
+            acc_max=5.0,
+            add_position_constraint=True,
+            add_velocity_constraint=False,
+            add_acceleration_constraint=False,
+            viz_traj=self.viz_traj,
+            viz_traj_color_rgba=self.viz_traj_color_rgba,
+            vehicle_name=self.drone_name,
+        ).join()
 
 
-        self.previous_position = np.copy(self.home_position)
-        self.previous_distance = np.linalg.norm(self.home_position - gate_position)
+        if gate_index == 0:
+            self.airsim_client.moveToYawAsync(yaw=90).join()
+
+
+        self.previous_position = np.copy(initial_position_array)
+        self.previous_distance = np.linalg.norm(initial_position_array - gate_position)
 
         # print(f"Initial Distance {self.previous_distance:.5f}")
         
@@ -517,7 +474,7 @@ class DroneEnvSB3(gym.Env):
         
         # Calculate new state and reward
         observation = self._get_observation()
-        reward, terminated = self._compute_reward_April12(action=action, verbose=verbose)
+        reward, terminated = self._compute_reward_April15(action=action, verbose=verbose)
 
         # time.sleep(0.25)
 
@@ -564,13 +521,15 @@ class DroneEnvSB3(gym.Env):
         position_distance = np.linalg.norm(drone_position - gate_position)
         orientation_distance = quaternion_orientational_distance(drone_orientation, gate_orientation)
 
+        alignment_reward_axis0 = self.calculate_alignment_reward(drone_position, gate_position, state.orientation, 1.0, 0)
+
 
         observation = np.array([self.previous_position[0], self.previous_position[1], self.previous_position[2],
                                 drone_position[0], drone_position[1], drone_position[2],
                                 drone_orientation[0], drone_orientation[1], drone_orientation[2], drone_orientation[3],
                                 gate_position[0], gate_position[1], gate_position[2],
                                 gate_orientation[0], gate_orientation[1], gate_orientation[2], gate_orientation[3],
-                                self.previous_distance, position_distance, orientation_distance])
+                                self.previous_distance, position_distance, alignment_reward_axis0])
         
         # observation = self.get_image()
 
@@ -593,8 +552,7 @@ class DroneEnvSB3(gym.Env):
         return threshold
 
 
-
-    def _compute_reward_April12(self, action, threshold_coeff=5.0, verbose=False):
+    def _compute_reward_April15(self, action, threshold_coeff=5.0, verbose=False):
         done = False
 
         state = self.airsim_client.getMultirotorState()
@@ -619,17 +577,24 @@ class DroneEnvSB3(gym.Env):
 
 
         optimal_speed = 1.5  # Define an optimal speed that is safe but effective
-        alignment_scale = 5
+        alignment_scale = 1
 
         speed_reward = -abs(drone_velocity_norm - optimal_speed)  # Penalize deviation from the optimal speed
 
         # Adjust current distance reward to be less aggressive
         distance_reward_coefficient = -0.1  # Less severe than previous
-        reward = (current_distance * distance_reward_coefficient) + speed_reward + distance_difference
+        distance_difference_coefficient = 1.0
+        reward = (current_distance * distance_reward_coefficient) + speed_reward + distance_difference_coefficient * distance_difference
 
         alignment_reward_axis0 = self.calculate_alignment_reward(drone_position, gate_position, state.kinematics_estimated.orientation, alignment_scale, 0)
         # alignment_reward_axis1 = self.calculate_alignment_reward(drone_position, gate_position, state.kinematics_estimated.orientation, alignment_scale, 1)
         # alignment_reward_axis2 = self.calculate_alignment_reward(drone_position, gate_position, state.kinematics_estimated.orientation, alignment_scale, 2)
+
+        drone_orientation = np.array([state.kinematics_estimated.orientation.w_val, state.kinematics_estimated.orientation.x_val, state.kinematics_estimated.orientation.y_val, state.kinematics_estimated.orientation.z_val])
+        gate_orientation = np.array([gate_state.orientation.w_val, gate_state.orientation.x_val, gate_state.orientation.y_val, gate_state.orientation.z_val])
+
+        orientation_distance = quaternion_orientational_distance(drone_orientation, gate_orientation)
+
 
         reward += alignment_reward_axis0
 
@@ -672,7 +637,7 @@ class DroneEnvSB3(gym.Env):
             reward += incremental_stuck_penalty
 
         if verbose:
-            print(f"Episode: {self.episode_number} Step: {self.timesteps}/{self.totalsteps} Reward: {reward:.3f} Velocity: {drone_velocity_norm:.3f} Distance: {current_distance:.3f} Distance Difference: {distance_difference:.3f} Alignment: {alignment_reward_axis0:.3f} Movement: {movement_reward:.3f} Target Gate: {self.gate_index}")
+            print(f"Episode: {self.episode_number} Step: {self.timesteps}/{self.totalsteps} Reward: {reward:.3f} Velocity: {drone_velocity_norm:.3f} Distance: {current_distance:.3f} Distance Difference: {distance_difference_coefficient*distance_difference:.3f} Alignment: {alignment_reward_axis0:.3f} Movement: {movement_reward:.3f} Target Gate: {self.gate_index}")
             
         self.previous_distance = np.copy(current_distance)
         self.previous_position = np.copy(drone_position)

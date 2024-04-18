@@ -1,4 +1,74 @@
-    
+# def reset(self, seed):
+            # if self.episode_number % episodes_to_consider == 0:
+        #     start_position = self.logger.get_challenging_start_position(episodes_to_consider)
+
+        #     if start_position is not None:
+        #         # for log in self.logger.episode_logs[0]:
+        #         #     print (log)
+
+        #         # print("New start position: ", start_position)
+        #         init_position = airsim.Vector3r(start_position[0], start_position[1], start_position[2])
+        #         self.airsim_client.moveOnSplineAsync(
+        #             [init_position],
+        #             vel_max=15.0,
+        #             acc_max=5.0,
+        #             add_position_constraint=True,
+        #             add_velocity_constraint=False,
+        #             add_acceleration_constraint=False,
+        #             viz_traj=self.viz_traj,
+        #             viz_traj_color_rgba=self.viz_traj_color_rgba,
+        #             vehicle_name=self.drone_name,
+        #         ).join()
+
+        # else:
+            
+        #     # Initialize the drone's position with Gaussian noise
+        #     initial_position_array = self.home_position + np.random.normal(0, std_dev, size=self.home_position.shape)
+        #     initial_position = airsim.Vector3r(initial_position_array[0], initial_position_array[1], initial_position_array[2])
+                    
+        #     # self.airsim_client.moveToYawAsync(yaw=90).join()
+
+        #     self.airsim_client.moveToPositionAsync(x=initial_position_array[0], y=initial_position_array[1], z=initial_position_array[2], velocity=15).join()
+
+            # self.airsim_client.moveOnSplineAsync(
+            #     [initial_position],
+            #     vel_max=15.0,
+            #     acc_max=5.0,
+            #     add_position_constraint=True,
+            #     add_velocity_constraint=False,
+            #     add_acceleration_constraint=False,
+            #     viz_traj=self.viz_traj,
+            #     viz_traj_color_rgba=self.viz_traj_color_rgba,
+            #     vehicle_name=self.drone_name,
+            # ).join()
+
+
+        # # gate_index = np.random.randint(0,6)
+        # # print(f"Drone goes towards to the Gate {gate_index} for training")
+
+        # for i in range(gate_index):
+        #     gate_state = self.gate_poses_ground_truth[i]
+        #     gate_position = airsim.Vector3r(gate_state.position.x_val, gate_state.position.y_val, gate_state.position.z_val)
+        #     # print(f"First target Gate {i} x:{gate_state.position.x_val:.4f}, y:{gate_state.position.y_val:.4f}, z:{gate_state.position.z_val:.4f}")
+
+        #     self.airsim_client.moveOnSplineAsync(
+        #         [gate_position],
+        #         vel_max=15.0,
+        #         acc_max=5.0,
+        #         add_position_constraint=True,
+        #         add_velocity_constraint=False,
+        #         add_acceleration_constraint=False,
+        #         viz_traj=self.viz_traj,
+        #         viz_traj_color_rgba=self.viz_traj_color_rgba,
+        #         vehicle_name=self.drone_name,
+        #     ).join()
+
+        # #     state = self.airsim_client.getMultirotorState().kinematics_estimated
+        #     # print(f"Drone Position x:{state.position.x_val:.4f}, y:{state.position.y_val:.4f}, z:{state.position.z_val:.4f}")
+
+
+
+
 # def reset(self, seed=None):
     #     self.timesteps = 0
     #     self.positions = []

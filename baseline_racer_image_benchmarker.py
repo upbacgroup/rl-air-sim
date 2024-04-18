@@ -102,6 +102,8 @@ class BaselineRacerImageBenchmarker(BaselineRacer):
         response = self.airsim_client_images.simGetImages(request)
         img_rgb_1d = np.fromstring(response[0].image_data_uint8, dtype=np.uint8)
         img_rgb = img_rgb_1d.reshape(response[0].height, response[0].width, 3)
+        # img_rgb = img_rgb.reshape(160, 120, 3)
+        resized_image = cv2.resize(img_rgb, (160, 120))
         self.image_benchmark_total_time += time.time() - iter_start_time
         avg_fps = 1.0 / (
             (self.image_benchmark_total_time) / float(self.image_benchmark_num_images)
@@ -113,8 +115,9 @@ class BaselineRacerImageBenchmarker(BaselineRacer):
             )
         )
 
-        if self.save_img and self.image_benchmark_num_images % 10 == 0:
-            cv2.imwrite("image_outputs/img_" + str(self.image_benchmark_num_images) + ".png", img_rgb) 
+        if self.save_img and self.image_benchmark_num_images % 20 == 0:
+            cv2.imwrite("/home/onur/Downloads/airsim_droneracing/imgs/img_" + str(self.image_benchmark_num_images) + ".png", resized_image) 
+            
         # uncomment following lines to viz image
         # if self.viz_image_cv2:
         # cv2.imshow("img_rgb", img_rgb_1d_new)
@@ -163,7 +166,7 @@ if __name__ == "__main__":
             "Qualifier_Tier_2",
             "Qualifier_Tier_3",
         ],
-        default="Soccer_Field_Medium",
+        default="Soccer_Field_Easy",
     )
     parser.add_argument(
         "--enable_viz_traj", dest="viz_traj", action="store_true", default=False
@@ -180,7 +183,7 @@ if __name__ == "__main__":
         action="store_true",
         default=False,
     )
-    parser.add_argument("--race_tier", type=int, choices=[1, 2, 3], default=1)
+    parser.add_argument("--race_tier", type=int, choices=[1, 2, 3], default=4)
 
     args = parser.parse_args()
     main(args)

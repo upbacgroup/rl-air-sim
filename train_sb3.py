@@ -57,8 +57,8 @@ def main():
     train_timesteps = 1000000
     deterministic = True
 
-    load_path = "SB3/PPO_April11/saved_model/best_model/best_model"
-    exp_name = 'PPO_April12'
+    load_path = ""#"SB3/PPO_April18/saved_model/best_model/best_model"
+    exp_name = 'PPO_April18'
     wandb_project_name = "Airsim_Drone_Gate"
     wandb_entity = "onurakgun"
     now = datetime.now() # current date and time
